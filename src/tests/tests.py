@@ -6,7 +6,7 @@ from stardist.matching import matching_dataset
 
 stardist_verbose = False
 
-eps = .01
+eps = .0001
 
 def eqf(a, b):
     return (a-b)**2 < eps
@@ -143,10 +143,13 @@ def test_stardist_matching_multiple_images_1():
     # Draw object #4 (only on the second image)
     mask_2b[40:50, 90:100] = 4
 
+    # Draw object #5 (only on the second image)
+    mask_2b[50:60, 90:100] = 5
+
     assumed_scores_b = np.array([
-        [0.6,   0.,     0.,     0.], 
-        [0.,    0.8,    0.,     0.], 
-        [0.,    0.,     0.,     0.]])
+        [0.6,   0.,     0.,     0.,     0.], 
+        [0.,    0.8,    0.,     0.,     0.], 
+        [0.,    0.,     0.,     0.,     0.]])
 
     matching = matching_dataset([mask_1a, mask_1b], [mask_2a, mask_2b], scores_input=False, by_image=True)
     
@@ -157,7 +160,7 @@ def test_stardist_matching_multiple_images_1():
     
     a_tp_b = 2
     a_fn_b = 1
-    a_fp_b = 2
+    a_fp_b = 3
 
     # Resulting object counts
     tp = matching.tp
@@ -169,7 +172,7 @@ def test_stardist_matching_multiple_images_1():
     assert fp==a_fp_a+a_fp_b, ValueError("Test failed (fp)")
 
     assumed_digits_score_a = a_tp_a**2/(a_tp_a**2+a_tp_a*a_fn_a+a_tp_a*a_fp_a+a_fp_a*a_fn_a)
-    assumed_digits_score_b = a_tp_a**2/(a_tp_a**2+a_tp_a*a_fn_a+a_tp_a*a_fp_a+a_fp_a*a_fn_a)
+    assumed_digits_score_b = a_tp_b**2/(a_tp_b**2+a_tp_b*a_fn_b+a_tp_b*a_fp_b+a_fp_b*a_fn_b)
     assumed_digits_score = .5*(assumed_digits_score_a + assumed_digits_score_b)
     assert eqf(assumed_digits_score, matching.digits_score), ValueError("Test failed (digits score)")
 
@@ -255,10 +258,13 @@ def test_stardist_matching_multiple_images_2():
     # Draw object #4 (only on the second image)
     mask_2b[40:50, 90:100] = 4
 
+    # Draw object #5 (only on the second image)
+    mask_2b[50:60, 90:100] = 5
+
     assumed_scores_b = np.array([
-        [0.6,   0.,     0.,     0.], 
-        [0.,    0.8,    0.,     0.], 
-        [0.,    0.,     0.,     0.]])
+        [0.6,   0.,     0.,     0.,     0.], 
+        [0.,    0.8,    0.,     0.,     0.], 
+        [0.,    0.,     0.,     0.,     0.]])
 
     matching = matching_dataset([mask_1a, mask_1b], [mask_2a, mask_2b], scores_input=False, by_image=False)
     
@@ -269,7 +275,7 @@ def test_stardist_matching_multiple_images_2():
     
     a_tp_b = 2
     a_fn_b = 1
-    a_fp_b = 2
+    a_fp_b = 3
 
     # Resulting object counts
     tp = matching.tp
