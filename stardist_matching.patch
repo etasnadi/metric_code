@@ -1,0 +1,205 @@
+diff --git a/stardist/matching.py b/stardist/matching.py
+index 4477cad..f026228 100644
+--- a/stardist/matching.py
++++ b/stardist/matching.py
+@@ -44,11 +44,15 @@ def label_overlap(x, y, check=True):
+ 
+ @jit(nopython=True)
+ def _label_overlap(x, y):
++
+     x = x.ravel()
+     y = y.ravel()
+     overlap = np.zeros((1+x.max(),1+y.max()), dtype=np.uint)
++    
++    
+     for i in range(len(x)):
+         overlap[x[i],y[i]] += 1
++    
+     return overlap
+ 
+ 
+@@ -106,7 +110,7 @@ def f1(tp,fp,fn):
+     return (2*tp)/(2*tp+fp+fn) if tp > 0 else 0
+ 
+ 
+-def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False):
++def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False, scores_input = False, verbose=False):
+     """Calculate detection/instance segmentation metrics between ground truth and predicted label images.
+ 
+     Currently, the following metrics are implemented:
+@@ -150,37 +154,59 @@ def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False):
+     Matching(criterion='iou', thresh=0.5, fp=1, tp=0, fn=1, precision=0, recall=0, accuracy=0, f1=0, n_true=1, n_pred=1, mean_true_score=0.0, mean_matched_score=0.0, panoptic_quality=0.0)
+ 
+     """
+-    _check_label_array(y_true,'y_true')
+-    _check_label_array(y_pred,'y_pred')
+-    y_true.shape == y_pred.shape or _raise(ValueError("y_true ({y_true.shape}) and y_pred ({y_pred.shape}) have different shapes".format(y_true=y_true, y_pred=y_pred)))
+-    criterion in matching_criteria or _raise(ValueError("Matching criterion '%s' not supported." % criterion))
+-    if thresh is None: thresh = 0
+-    thresh = float(thresh) if np.isscalar(thresh) else map(float,thresh)
+-
+-    y_true, _, map_rev_true = relabel_sequential(y_true)
+-    y_pred, _, map_rev_pred = relabel_sequential(y_pred)
+-
+-    overlap = label_overlap(y_true, y_pred, check=False)
+-    scores = matching_criteria[criterion](overlap)
+-    assert 0 <= np.min(scores) <= np.max(scores) <= 1
+-
+-    # ignoring background
+-    scores = scores[1:,1:]
++    '''
++        scores and matched_ids are passed in y_true(scores) and y_pred(matched_ids)
++    '''
++
++    if scores_input:
++        scores = y_true
++        matched_ids = y_pred
++    else:
++        _check_label_array(y_true,'y_true')
++        _check_label_array(y_pred,'y_pred')
++        y_true.shape == y_pred.shape or _raise(ValueError("y_true ({y_true.shape}) and y_pred ({y_pred.shape}) have different shapes".format(y_true=y_true, y_pred=y_pred)))
++        criterion in matching_criteria or _raise(ValueError("Matching criterion '%s' not supported." % criterion))
++        if thresh is None: thresh = 0
++        thresh = float(thresh) if np.isscalar(thresh) else map(float,thresh)
++
++        y_true, _, map_rev_true = relabel_sequential(y_true)
++        y_pred, _, map_rev_pred = relabel_sequential(y_pred)
++
++        overlap = label_overlap(y_true, y_pred, check=False)
++        scores = matching_criteria[criterion](overlap)
++        assert 0 <= np.min(scores) <= np.max(scores) <= 1
++
++        # ignoring background
++        scores = scores[1:,1:]
++    
+     n_true, n_pred = scores.shape
+     n_matched = min(n_true, n_pred)
+ 
++    if verbose:
++        print('Scores matrix shape: ', scores.shape)
++        print(scores)
++
+     def _single(thr):
+         # not_trivial = n_matched > 0 and np.any(scores >= thr)
+         not_trivial = n_matched > 0
+         if not_trivial:
+-            # compute optimal matching with scores as tie-breaker
+-            costs = -(scores >= thr).astype(float) - scores / (2*n_matched)
+-            true_ind, pred_ind = linear_sum_assignment(costs)
+-            assert n_matched == len(true_ind) == len(pred_ind)
++            if not scores_input:
++                # compute optimal matching with scores as tie-breaker
++                costs = -(scores >= thr).astype(float) - scores / (2*n_matched)
++                true_ind, pred_ind = linear_sum_assignment(costs)
++            else:
++                true_ind, pred_ind = matched_ids
++            
+             match_ok = scores[true_ind,pred_ind] >= thr
+             tp = np.count_nonzero(match_ok)
+         else:
+             tp = 0
++
++        if verbose:
++            print('Threshold:', thr)
++            print('Matching: ', true_ind, '->',  pred_ind)
++            print('True positives: ', tp)
++
+         fp = n_pred - tp
+         fn = n_true - tp
+         # assert tp+fp == n_pred
+@@ -203,6 +229,7 @@ def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False):
+             fn                 = fn,
+             precision          = precision(tp,fp,fn),
+             recall             = recall(tp,fp,fn),
++            digits_score       = precision(tp,fp,fn) * recall(tp,fp,fn),
+             accuracy           = accuracy(tp,fp,fn),
+             f1                 = f1(tp,fp,fn),
+             n_true             = n_true,
+@@ -211,6 +238,8 @@ def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False):
+             mean_matched_score = mean_matched_score,
+             panoptic_quality   = panoptic_quality,
+         )
++
++
+         if bool(report_matches):
+             if not_trivial:
+                 stats_dict.update (
+@@ -227,23 +256,25 @@ def matching(y_true, y_pred, thresh=0.5, criterion='iou', report_matches=False):
+                 )
+         return namedtuple('Matching',stats_dict.keys())(*stats_dict.values())
+ 
+-    return _single(thresh) if np.isscalar(thresh) else tuple(map(_single,thresh))
+ 
++    rr =_single(thresh) if np.isscalar(thresh) else tuple(map(_single,thresh))
++    return rr
+ 
+ 
+-def matching_dataset(y_true, y_pred, thresh=0.5, criterion='iou', by_image=False, show_progress=True, parallel=False):
++
++def matching_dataset(y_true, y_pred, thresh=0.5, criterion='iou', by_image=False, show_progress=True, parallel=False, scores_input = False, verbose=False):
+     """matching metrics for list of images, see `stardist.matching.matching`
+     """
+     len(y_true) == len(y_pred) or _raise(ValueError("y_true and y_pred must have the same length."))
+     return matching_dataset_lazy (
+-        tuple(zip(y_true,y_pred)), thresh=thresh, criterion=criterion, by_image=by_image, show_progress=show_progress, parallel=parallel,
++        tuple(zip(y_true,y_pred)), thresh=thresh, criterion=criterion, by_image=by_image, show_progress=show_progress, parallel=parallel, scores_input=scores_input, verbose=verbose
+     )
+ 
+ 
+ 
+-def matching_dataset_lazy(y_gen, thresh=0.5, criterion='iou', by_image=False, show_progress=True, parallel=False):
++def matching_dataset_lazy(y_gen, thresh=0.5, criterion='iou', by_image=False, show_progress=True, parallel=False, scores_input=False, verbose=False):
+ 
+-    expected_keys = set(('fp', 'tp', 'fn', 'precision', 'recall', 'accuracy', 'f1', 'criterion', 'thresh', 'n_true', 'n_pred', 'mean_true_score', 'mean_matched_score', 'panoptic_quality'))
++    expected_keys = set(('fp', 'tp', 'fn', 'precision', 'recall', 'accuracy', 'f1', 'criterion', 'thresh', 'n_true', 'n_pred', 'mean_true_score', 'mean_matched_score', 'panoptic_quality', 'digits_score'))
+ 
+     single_thresh = False
+     if np.isscalar(thresh):
+@@ -258,22 +289,27 @@ def matching_dataset_lazy(y_gen, thresh=0.5, criterion='iou', by_image=False, sh
+     # compute matching stats for every pair of label images
+     if parallel:
+         from concurrent.futures import ThreadPoolExecutor
+-        fn = lambda pair: matching(*pair, thresh=thresh, criterion=criterion, report_matches=False)
++        fn = lambda pair: matching(*pair, thresh=thresh, criterion=criterion, report_matches=False, scores_input=scores_input, verbose=verbose)
+         with ThreadPoolExecutor() as pool:
+             stats_all = tuple(pool.map(fn, tqdm(y_gen,**tqdm_kwargs)))
+     else:
+         stats_all = tuple (
+-            matching(y_t, y_p, thresh=thresh, criterion=criterion, report_matches=False)
++            matching(y_t, y_p, thresh=thresh, criterion=criterion, report_matches=False, scores_input=scores_input, verbose=verbose)
+             for y_t,y_p in tqdm(y_gen,**tqdm_kwargs)
+         )
+ 
+     # accumulate results over all images for each threshold separately
+     n_images, n_threshs = len(stats_all), len(thresh)
++
++
+     accumulate = [{} for _ in range(n_threshs)]
+     for stats in stats_all:
+         for i,s in enumerate(stats):
+             acc = accumulate[i]
+             for k,v in s._asdict().items():
++                if k == 'digits_score':
++                    pass
++
+                 if k == 'mean_true_score' and not bool(by_image):
+                     # convert mean_true_score to "sum_matched_score"
+                     acc[k] = acc.setdefault(k,0) + v * s.n_true
+@@ -290,7 +326,7 @@ def matching_dataset_lazy(y_gen, thresh=0.5, criterion='iou', by_image=False, sh
+         acc['thresh'] = thr
+         acc['by_image'] = bool(by_image)
+         if bool(by_image):
+-            for k in ('precision', 'recall', 'accuracy', 'f1', 'mean_true_score', 'mean_matched_score', 'panoptic_quality'):
++            for k in ('precision', 'recall', 'accuracy', 'f1', 'mean_true_score', 'mean_matched_score', 'panoptic_quality', 'digits_score'):
+                 acc[k] /= n_images
+         else:
+             tp, fp, fn, n_true = acc['tp'], acc['fp'], acc['fn'], acc['n_true']
+@@ -308,6 +344,8 @@ def matching_dataset_lazy(y_gen, thresh=0.5, criterion='iou', by_image=False, sh
+                 mean_true_score    = mean_true_score,
+                 mean_matched_score = mean_matched_score,
+                 panoptic_quality   = panoptic_quality,
++                # It was missing
++                digits_score       = precision(tp,fp,fn) * recall(tp,fp,fn)
+             )
+ 
+     accumulate = tuple(namedtuple('DatasetMatching',acc.keys())(*acc.values()) for acc in accumulate)
