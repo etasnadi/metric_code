@@ -44,3 +44,8 @@ One needs two additional files: the matching CSV and the pixel density for each 
 The results for each team will be saved into the output folder.
 
 It can be summarized using the `summary.py` or any other script.
+
+Creating the figures
+-----
+
+After getting the summarized metric CSV files, the figures used in the article can be generated with the `gen_figures.ipynb` notebook.
